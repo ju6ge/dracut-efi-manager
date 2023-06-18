@@ -1,0 +1,13 @@
+[package]
+name = "dracut-stub-manager"
+description = "This is a tool to automate building multiple efi stubs, it is intended to be used as a pacman hook"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+config = "0.13.3"
+regex = "1.8.4"
+serde = { version = "1.0.164", features = ["derive"] }
+version_operators = "0.0.1"
