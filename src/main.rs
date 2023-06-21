@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs};
+use std::{collections::BTreeMap, fs, process::Command, path::Path};
 
 use config::Config;
 use regex::Regex;
@@ -80,5 +80,14 @@ fn main() {
         }
     }).collect::<BTreeMap<&String, String>>();
 
-    println!("{newest_kernels:?}");
+    for kernel in newest_kernels {
+        let version = kernel.1;
+        let destination = Path::new(&settings.efi_dir).join(settings.build_mappings.get(kernel.0).expect("Error getting stub destination from config!"));
+        println!("{version} => {destination:?}");
+        let dracut_build = Command::new("dracut")
+                                   .args(["--force", "--uefi", "--uefi-stub", "/usr/lib/systemd/boot/efi/linuxx64.efi.stub", destination.to_str().unwrap(), "--kver", &version])
+                                   .output()
+                                   .expect("Efi Stub generation Failed! Dracut Error:");
+        println!("{dracut_build:#?}");
+    }
 }

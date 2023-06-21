@@ -9,7 +9,7 @@ Why use a boot-loader anyway. EFI is more than capable of handling booting the s
 Dracut supports this very well! All that is needed for it to be usable is to automate the process. I don't like shell scripts so I wrote this tool.
 
 ## Roadmap
-
+- [x] stub generation
 - [ ] support building multiple efi-stubs at once
 - [ ] working pacman hook
 - [ ] mange efi boot entries automatically
