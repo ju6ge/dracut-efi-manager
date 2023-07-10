@@ -10,4 +10,5 @@ edition = "2021"
 config = "0.13.3"
 regex = "1.8.4"
 serde = { version = "1.0.164", features = ["derive"] }
+spinners = "4.1.0"
 version_operators = "0.0.1"

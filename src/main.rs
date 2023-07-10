@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, fs, process::Command, path::Path};
 use config::Config;
 use regex::Regex;
 use serde::{Serialize, Deserialize};
+use spinners::{Spinner, Spinners};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct EfiStubBuildConfig {
@@ -83,11 +84,17 @@ fn main() {
     for kernel in newest_kernels {
         let version = kernel.1;
         let destination = Path::new(&settings.efi_dir).join(settings.build_mappings.get(kernel.0).expect("Error getting stub destination from config!"));
-        println!("{version} => {destination:?}");
+        let mut task_indicator = Spinner::new(Spinners::Dots9, format!("Building efi-stub for kernel {version} at {destination:?}"));
         let dracut_build = Command::new("dracut")
                                    .args(["--force", "--uefi", "--uefi-stub", "/usr/lib/systemd/boot/efi/linuxx64.efi.stub", destination.to_str().unwrap(), "--kver", &version])
-                                   .output()
-                                   .expect("Efi Stub generation Failed! Dracut Error:");
-        println!("{dracut_build:#?}");
+                                   .output();
+        match dracut_build {
+            Ok(_result) => {
+                task_indicator.stop_with_symbol("✅");
+            },
+            Err(_err) => {
+                task_indicator.stop_with_symbol("❌");
+            },
+        }
     }
 }
