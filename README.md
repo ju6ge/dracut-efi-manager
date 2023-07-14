@@ -22,7 +22,7 @@ zen = "ArchLinuxZfsStub.efi"
 
 ## Roadmap
 - [x] stub generation
-- [ ] working pacman hook
+- [x] working pacman hook
 - [ ] mange efi boot entries automatically
 - [ ] sign efi images for secure boot
 - [ ] support building multiple efi-stubs at once

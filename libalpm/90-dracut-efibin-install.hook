@@ -1,0 +1,12 @@
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Target = usr/lib/modules/*/vmlinuz
+Target = usr/bin/dracut
+
+[Action]
+Description = Updating linux efi binaries
+When = PostTransaction
+Exec = /usr/local/bin/dracut-efi-manager build
+NeedsTargets

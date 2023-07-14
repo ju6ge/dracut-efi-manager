@@ -1,7 +1,7 @@
 [package]
-name = "dracut-stub-manager"
+name = "dracut-efi-manager"
 authors = ["ju6ge <judge@felixrichter.tech>"]
-description = "This is a tool to automate building multiple efi stubs, it is intended to be used as a pacman hook"
+description = "This is a tool to automate building multiple efi binaries, it is intended to be used as a pacman hook"
 version = "0.2.0"
 edition = "2021"
 
@@ -12,5 +12,4 @@ clap = { version = "4.3.11", features = ["cargo", "derive"] }
 config = "0.13.3"
 regex = "1.8.4"
 serde = { version = "1.0.164", features = ["derive"] }
-spinners = "4.1.0"
 version_operators = "0.0.1"

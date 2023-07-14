@@ -1,0 +1,10 @@
+[Trigger]
+Type = Path
+Operation = Remove
+Target = usr/lib/modules/*/vmlinuz
+
+[Action]
+Description = Cleaning efi binaries
+When = PreTransaction
+Exec = /usr/local/bin/dracut-efi-manager clean
+NeedsTargets
