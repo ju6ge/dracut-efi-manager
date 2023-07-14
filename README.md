@@ -25,4 +25,4 @@ zen = "ArchLinuxZfsStub.efi"
 - [x] working pacman hook
 - [ ] mange efi boot entries automatically
 - [ ] sign efi images for secure boot
-- [ ] support building multiple efi-stubs at once
+- [ ] support building multiple efi binaries at once

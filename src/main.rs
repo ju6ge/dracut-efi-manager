@@ -62,6 +62,12 @@ fn is_valid_installation(modules_path: &Path) -> bool {
 }
 
 
+fn get_current_running_kernel() -> String {
+    let current_running_kernel: String = String::from_utf8(Command::new("uname").arg("-r").output().unwrap().stdout).unwrap().trim().to_string();
+    current_running_kernel
+}
+
+
 fn get_newest_installed_kernels(settings: &EfiStubBuildConfig) -> BTreeMap<&String, String> {
     //accumulator for kernels modules directories to find the newest fill with empty vectors
     let mut found_kernel_modules: BTreeMap<&String, Vec<KernelVersion>> =
@@ -69,26 +75,20 @@ fn get_newest_installed_kernels(settings: &EfiStubBuildConfig) -> BTreeMap<&Stri
 
     // cluster kernels by version
     for entry in fs::read_dir(settings.kernel_modules_dir.clone()).unwrap() {
-        match entry {
-            Ok(entry) => {
-                if is_valid_installation(&entry.path()) {
-                    let kernel_folder = entry.file_name();
-                    for kernel_ident in settings.build_mappings.keys() {
-                        match kernel_folder.clone().into_string() {
-                            Ok(kernel_folder_name) => {
-                                if kernel_folder_name.contains(kernel_ident) {
-                                    found_kernel_modules.get_mut(kernel_ident).unwrap().push((&kernel_folder_name as &dyn ToString).into());
-                                } else {
-                                    continue;
-                                }
-                            },
-                            Err(_) => continue,
+        entry.ok().and_then(|entry| {
+            if is_valid_installation(&entry.path()) {
+                let kernel_folder = entry.file_name();
+                for kernel_ident in settings.build_mappings.keys() {
+                    kernel_folder.clone().into_string().ok().and_then(|kernel_folder_name| {
+                        if kernel_folder_name.contains(kernel_ident) {
+                            found_kernel_modules.get_mut(kernel_ident).unwrap().push((&kernel_folder_name as &dyn ToString).into());
                         }
-                    }
+                        Some(())
+                    });
                 }
             }
-            Err(_) => { /* nothing to do here */ }
-        }
+            Some(())
+        });
     }
     //println!("{found_kernel_modules:#?}");
 
@@ -185,6 +185,31 @@ fn clean_efi_binaries(settings: &EfiStubBuildConfig) {
     }
     if removed_binarys == 0 {
         println!("Efi directory is already clean.");
+    }
+    //cleanup old kernel directories
+    for entry in fs::read_dir(settings.kernel_modules_dir.clone()).unwrap() {
+        entry.ok().and_then(|entry| {
+            entry.file_name().into_string().ok().and_then(|kernel_name| {
+                if kernel_name != get_current_running_kernel() && !is_valid_installation(&entry.path()) {
+                    print!("Removing old kernel modules directory {kernel_name} … ");
+                    let _ = io::stdout().flush();
+                    let remove_old_kernel_module_dir = Command::new("rm").args(["-rf",entry.path().to_str().unwrap()]).output();
+                    match remove_old_kernel_module_dir {
+                        Ok(result) => {
+                            if result.status.success() {
+                                println!("✅");
+                            } else {
+                                println!("❌");
+                            }
+                        }
+                        Err(_err) => {
+                            println!("❌");
+                        }
+                    }
+                }
+                Some(())
+            })
+        });
     }
 }
 
