@@ -8,5 +8,5 @@ Target = usr/bin/dracut
 [Action]
 Description = Updating linux efi binaries
 When = PostTransaction
-Exec = { prefix }/bin/dracut-efi-manager build
+Exec = {{ prefix }}/bin/dracut-efi-manager build
 NeedsTargets

@@ -13,3 +13,6 @@ config = "0.13.3"
 regex = "1.8.4"
 serde = { version = "1.0.164", features = ["derive"] }
 version_operators = "0.0.1"
+
+[build-dependencies]
+askama = "0.12.0"
