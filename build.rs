@@ -1,19 +1,24 @@
-use std::{env, path::{Path, PathBuf}, fs::File, io::{Write, Error}};
+use std::{
+    env,
+    fs::File,
+    io::{Error, Write},
+    path::{Path, PathBuf},
+};
 
 use askama::Template;
 
 #[derive(Debug, Template)]
-#[template(path="90-dracut-efibin-install.hook", escape="none")]
+#[template(path = "90-dracut-efibin-install.hook", escape = "none")]
 #[allow(dead_code)]
 struct PacmanInstallHook {
-    prefix: String
+    prefix: String,
 }
 
 #[derive(Debug, Template)]
-#[template(path="90-dracut-efibin-clean.hook", escape="none")]
+#[template(path = "90-dracut-efibin-clean.hook", escape = "none")]
 #[allow(dead_code)]
 struct PacmanCleanHook {
-    prefix: String
+    prefix: String,
 }
 
 fn write_to_file(path: &Path, content: &dyn ToString) -> Result<(), Error> {
@@ -30,7 +35,11 @@ fn write_to_file(path: &Path, content: &dyn ToString) -> Result<(), Error> {
 fn get_current_binary_directory() -> PathBuf {
     let out_dir = std::env::var("OUT_DIR").expect("Failed to retrieve OUT_DIR");
     let path = Path::new(&out_dir);
-    path.parent().and_then(|p| p.parent()).and_then(|p| p.parent()).and_then(|p| p.canonicalize().ok()).unwrap()
+    path.parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+        .and_then(|p| p.canonicalize().ok())
+        .unwrap()
 }
 
 fn main() {
@@ -39,13 +48,19 @@ fn main() {
     let binary_dir = get_current_binary_directory();
 
     let _ = write_to_file(
-        &binary_dir.join("libalpm")
-                  .join("90-dracut-efibin-install.hook"),
-        &PacmanInstallHook{ prefix: prefix.clone() } as &dyn ToString
+        &binary_dir
+            .join("libalpm")
+            .join("90-dracut-efibin-install.hook"),
+        &PacmanInstallHook {
+            prefix: prefix.clone(),
+        } as &dyn ToString,
     );
     let _ = write_to_file(
-        &binary_dir.join("libalpm")
-                  .join("90-dracut-efibin-clean.hook"),
-        &PacmanCleanHook{ prefix: prefix.clone() } as &dyn ToString
+        &binary_dir
+            .join("libalpm")
+            .join("90-dracut-efibin-clean.hook"),
+        &PacmanCleanHook {
+            prefix: prefix.clone(),
+        } as &dyn ToString,
     );
 }

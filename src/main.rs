@@ -1,20 +1,29 @@
 //! Dracut Stub Manager
 //!
 //! A tool to create EFI binaries for Archlinux kernels for direct boot without a bootloader.
-use std::{collections::BTreeMap, fs::{self, File}, path::{Path, PathBuf}, process::Command, io::{self, Write, Read}};
+use std::{
+    collections::BTreeMap,
+    fs::{self, File},
+    io::{self, Read, Write},
+    path::{Path, PathBuf},
+    process::Command,
+};
 
+use clap::Parser;
 use config::Config;
-use gpt::{partition_types, partition::Partition};
+use efivar::boot::{BootEntry, FilePathList, FilePath, EFIHardDrive, BootEntryAttributes};
+use gpt::{partition::Partition, partition_types};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(author, about, version)]
-#[command( help_template = "Author: {author} \nVersion: {version} \n{about-section} \n{usage-heading} {usage}\n\n{all-args} {tab}" )]
+#[command(
+    help_template = "Author: {author} \nVersion: {version} \n{about-section} \n{usage-heading} {usage}\n\n{all-args} {tab}"
+)]
 struct DracutCmdArgs {
     #[command(subcommand)]
-    command: DracutBuilderCommands
+    command: DracutBuilderCommands,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -24,7 +33,7 @@ enum DracutBuilderCommands {
     /// clean efi directory from kernels that are not required anymore
     Clean,
     /// scan drives for efi partions and add boot entries for efi executables
-    Bootentries
+    Bootentries,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,18 +53,23 @@ struct KernelVersion {
 impl Into<KernelVersion> for &dyn ToString {
     fn into(self) -> KernelVersion {
         let version_regex = Regex::new(r"[\d]+\.[\d]+\.[\d]+").unwrap();
-        let subversion_regex = Regex::new(r"-([\d]+)") .unwrap();
+        let subversion_regex = Regex::new(r"-([\d]+)").unwrap();
 
         let to_parse = self.to_string();
-        let version = version_regex.captures(&to_parse)
-                                .and_then(|v| v.get(0))
-                                .and_then(|v| Some(v.as_str()))
-                                .unwrap_or("0.0.0");
-        let subversion = subversion_regex.captures(&to_parse)
-                                .and_then(|v| v.get(1))
-                                .and_then(|v| Some(v.as_str()))
-                                .unwrap_or("0");
-        KernelVersion { version: format!("{version}.{subversion}"), full_name: to_parse }
+        let version = version_regex
+            .captures(&to_parse)
+            .and_then(|v| v.get(0))
+            .and_then(|v| Some(v.as_str()))
+            .unwrap_or("0.0.0");
+        let subversion = subversion_regex
+            .captures(&to_parse)
+            .and_then(|v| v.get(1))
+            .and_then(|v| Some(v.as_str()))
+            .unwrap_or("0");
+        KernelVersion {
+            version: format!("{version}.{subversion}"),
+            full_name: to_parse,
+        }
     }
 }
 
@@ -64,12 +78,14 @@ fn is_valid_installation(modules_path: &Path) -> bool {
     modules_path.join("vmlinuz").exists()
 }
 
-
 fn get_current_running_kernel() -> String {
-    let current_running_kernel: String = String::from_utf8(Command::new("uname").arg("-r").output().unwrap().stdout).unwrap().trim().to_string();
+    let current_running_kernel: String =
+        String::from_utf8(Command::new("uname").arg("-r").output().unwrap().stdout)
+            .unwrap()
+            .trim()
+            .to_string();
     current_running_kernel
 }
-
 
 fn get_newest_installed_kernels(settings: &EfiStubBuildConfig) -> BTreeMap<&String, String> {
     //accumulator for kernels modules directories to find the newest fill with empty vectors
@@ -82,12 +98,19 @@ fn get_newest_installed_kernels(settings: &EfiStubBuildConfig) -> BTreeMap<&Stri
             if is_valid_installation(&entry.path()) {
                 let kernel_folder = entry.file_name();
                 for kernel_ident in settings.build_mappings.keys() {
-                    kernel_folder.clone().into_string().ok().and_then(|kernel_folder_name| {
-                        if kernel_folder_name.contains(kernel_ident) {
-                            found_kernel_modules.get_mut(kernel_ident).unwrap().push((&kernel_folder_name as &dyn ToString).into());
-                        }
-                        Some(())
-                    });
+                    kernel_folder
+                        .clone()
+                        .into_string()
+                        .ok()
+                        .and_then(|kernel_folder_name| {
+                            if kernel_folder_name.contains(kernel_ident) {
+                                found_kernel_modules
+                                    .get_mut(kernel_ident)
+                                    .unwrap()
+                                    .push((&kernel_folder_name as &dyn ToString).into());
+                            }
+                            Some(())
+                        });
                 }
             }
             Some(())
@@ -117,8 +140,8 @@ fn get_newest_installed_kernels(settings: &EfiStubBuildConfig) -> BTreeMap<&Stri
         })
         .collect::<BTreeMap<&String, String>>();
 
-        //println!("{newest_kernels:?}");
-        newest_kernels
+    //println!("{newest_kernels:?}");
+    newest_kernels
 }
 
 fn build_efi_binaries(settings: &EfiStubBuildConfig) {
@@ -130,7 +153,10 @@ fn build_efi_binaries(settings: &EfiStubBuildConfig) {
                 .get(kernel.0)
                 .expect("Error getting binary destination from config!"),
         );
-        print!("Building efi binary for kernel {version} at {} … ", destination.file_name().unwrap().to_str().unwrap());
+        print!(
+            "Building efi binary for kernel {version} at {} … ",
+            destination.file_name().unwrap().to_str().unwrap()
+        );
         let _ = io::stdout().flush();
         let dracut_build = Command::new("dracut")
             .args([
@@ -170,7 +196,9 @@ fn clean_efi_binaries(settings: &EfiStubBuildConfig) {
             if destination.exists() {
                 print!("Removing old efi binary for {configured_kernel} kernel at {destination_name} … ");
                 let _ = io::stdout().flush();
-                let remove_old_binary = Command::new("rm").arg(destination.to_str().unwrap()).output();
+                let remove_old_binary = Command::new("rm")
+                    .arg(destination.to_str().unwrap())
+                    .output();
                 match remove_old_binary {
                     Ok(result) => {
                         if result.status.success() {
@@ -192,26 +220,34 @@ fn clean_efi_binaries(settings: &EfiStubBuildConfig) {
     //cleanup old kernel directories
     for entry in fs::read_dir(settings.kernel_modules_dir.clone()).unwrap() {
         entry.ok().and_then(|entry| {
-            entry.file_name().into_string().ok().and_then(|kernel_name| {
-                if kernel_name != get_current_running_kernel() && !is_valid_installation(&entry.path()) {
-                    print!("Removing old kernel modules directory {kernel_name} … ");
-                    let _ = io::stdout().flush();
-                    let remove_old_kernel_module_dir = Command::new("rm").args(["-rf",entry.path().to_str().unwrap()]).output();
-                    match remove_old_kernel_module_dir {
-                        Ok(result) => {
-                            if result.status.success() {
-                                println!("✅");
-                            } else {
+            entry
+                .file_name()
+                .into_string()
+                .ok()
+                .and_then(|kernel_name| {
+                    if kernel_name != get_current_running_kernel()
+                        && !is_valid_installation(&entry.path())
+                    {
+                        print!("Removing old kernel modules directory {kernel_name} … ");
+                        let _ = io::stdout().flush();
+                        let remove_old_kernel_module_dir = Command::new("rm")
+                            .args(["-rf", entry.path().to_str().unwrap()])
+                            .output();
+                        match remove_old_kernel_module_dir {
+                            Ok(result) => {
+                                if result.status.success() {
+                                    println!("✅");
+                                } else {
+                                    println!("❌");
+                                }
+                            }
+                            Err(_err) => {
                                 println!("❌");
                             }
                         }
-                        Err(_err) => {
-                            println!("❌");
-                        }
                     }
-                }
-                Some(())
-            })
+                    Some(())
+                })
         });
     }
 }
@@ -232,7 +268,11 @@ fn get_disk_device_paths() -> Vec<PathBuf> {
 
                 let partition_file = path.join("partition");
 
-                if path.is_dir() && file_name != "." && file_name != ".." && !partition_file.exists() {
+                if path.is_dir()
+                    && file_name != "."
+                    && file_name != ".."
+                    && !partition_file.exists()
+                {
                     disks.push(Path::new("/dev").join(file_name))
                 }
             }
@@ -247,7 +287,7 @@ fn get_mount_dir(device: &Path) -> Option<PathBuf> {
             let line_split = line.split(' ').collect::<Vec<_>>();
             if let Some(mounted_device) = line_split.get(0) {
                 if Path::new(mounted_device) == device {
-                    return Some(Path::new(line_split.get(1).unwrap()).to_path_buf())
+                    return Some(Path::new(line_split.get(1).unwrap()).to_path_buf());
                 }
             }
         }
@@ -258,12 +298,17 @@ fn get_mount_dir(device: &Path) -> Option<PathBuf> {
 struct EfiPartionInfo {
     part_nr: u32,
     disk_device: PathBuf,
-    info: Partition
+    info: Partition,
 }
 
 impl EfiPartionInfo {
     fn get_partiton_device(&self) -> Option<PathBuf> {
-        let disk_name = self.disk_device.file_name().unwrap().to_string_lossy().to_string();
+        let disk_name = self
+            .disk_device
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         if let Ok(entries) = fs::read_dir(Path::new("/sys/class/block").join(disk_name)) {
             for entry in entries {
                 if let Ok(entry) = entry {
@@ -272,7 +317,11 @@ impl EfiPartionInfo {
 
                     let partition_file = path.join("partition");
 
-                    if path.is_dir() && file_name != "." && file_name != ".." && partition_file.exists() {
+                    if path.is_dir()
+                        && file_name != "."
+                        && file_name != ".."
+                        && partition_file.exists()
+                    {
                         if let Ok(mut partition_file) = File::open(partition_file) {
                             let mut num_str = String::new();
                             let _ = partition_file.read_to_string(&mut num_str);
@@ -298,30 +347,89 @@ impl EfiPartionInfo {
                 None => {
                     had_to_be_mounted = true;
                     todo!();
-                },
+                }
             };
-            efi_binaries.append(&mut get_efi_binaries(&mount_dir).iter_mut().map(|efi_bin_path| {
-                efi_bin_path.strip_prefix(&mount_dir).unwrap().to_path_buf()
-            }).collect());
+            efi_binaries.append(
+                &mut get_efi_binaries(&mount_dir)
+                    .iter_mut()
+                    .map(|efi_bin_path| {
+                        efi_bin_path.strip_prefix(&mount_dir).unwrap().to_path_buf()
+                    })
+                    .collect(),
+            );
         }
         efi_binaries
     }
+
+    fn existing_boot_entries(&self) -> BTreeMap<PathBuf, BootEntry> {
+        let mut boot_entries_map = BTreeMap::new();
+        if let Ok(boot_entries) = efivar::system().get_boot_entries() {
+            for entry in boot_entries {
+                if let Ok(entry) = entry.0 {
+                    if let Some(boot_path) = entry.entry.clone().file_path_list {
+                        for efi_bin in self.get_efi_binaries() {
+                            if boot_path.hard_drive.partition_sig == self.info.part_guid
+                                && boot_path.file_path.path == efi_bin
+                            {
+                                boot_entries_map.insert(efi_bin, entry.entry.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        boot_entries_map
+    }
+
+    fn gen_boot_entry(&self, efi_bin: &Path, name: String) -> BootEntry {
+        BootEntry {
+            attributes: BootEntryAttributes::LOAD_OPTION_ACTIVE,
+            description: name,
+            file_path_list: FilePathList {
+                file_path: FilePath {
+                    path: efi_bin.to_path_buf()
+                },
+                hard_drive: EFIHardDrive {
+                    partition_number: self.part_nr,
+                    partition_start: self.info.first_lba,
+                    partition_size: (self.info.last_lba + 1) - self.info.first_lba,
+                    partition_sig: self.info.part_guid,
+                    format: 2,
+                    sig_type: efivar::boot::EFIHardDriveType::Gpt,
+                },
+            },
+            optional_data: Vec::new()
+        }
+    }
 }
+
 fn get_efi_binaries(path: &Path) -> Vec<PathBuf> {
     let mut binaries = Vec::new();
     if path.is_dir() {
-        binaries.append(&mut fs::read_dir(path).and_then(|entries| Ok(entries.into_iter().map(|entry| {
-            if let Ok(entry) = entry {
-                let file_name = entry.file_name().as_os_str().to_string_lossy().to_string();
-                if file_name != "." && file_name != ".." {
-                    Some(get_efi_binaries(&entry.path()))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }).flatten().flatten().collect::<Vec<PathBuf>>())).unwrap());
+        binaries.append(
+            &mut fs::read_dir(path)
+                .and_then(|entries| {
+                    Ok(entries
+                        .into_iter()
+                        .map(|entry| {
+                            if let Ok(entry) = entry {
+                                let file_name =
+                                    entry.file_name().as_os_str().to_string_lossy().to_string();
+                                if file_name != "." && file_name != ".." {
+                                    Some(get_efi_binaries(&entry.path()))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        })
+                        .flatten()
+                        .flatten()
+                        .collect::<Vec<PathBuf>>())
+                })
+                .unwrap(),
+        );
     } else {
         if let Some(ext) = path.extension() {
             if ext.eq_ignore_ascii_case("efi") {
@@ -338,7 +446,7 @@ fn get_efi_partitions() -> Vec<EfiPartionInfo> {
         if let Ok(gpt_info) = gpt::disk::read_disk(&disk) {
             for (nr, part) in gpt_info.partitions().into_iter() {
                 if part.part_type_guid == partition_types::EFI {
-                    efi_partitions.push(EfiPartionInfo{
+                    efi_partitions.push(EfiPartionInfo {
                         part_nr: *nr,
                         disk_device: disk.clone(),
                         info: part.clone(),
@@ -350,16 +458,13 @@ fn get_efi_partitions() -> Vec<EfiPartionInfo> {
     efi_partitions
 }
 
-
 fn main() {
     let args = DracutCmdArgs::parse();
 
     let settings: Option<EfiStubBuildConfig> = Config::builder()
         .add_source(config::File::with_name(SETTINGS_FILE))
         .build_cloned()
-        .and_then(|settings_file| {
-           settings_file.try_deserialize()
-        })
+        .and_then(|settings_file| settings_file.try_deserialize())
         .ok();
 
     match args.command {
@@ -369,19 +474,18 @@ fn main() {
             } else {
                 eprintln!("Build configuration not found!");
             }
-        },
+        }
         DracutBuilderCommands::Clean => {
             if let Some(settings) = settings {
                 clean_efi_binaries(&settings)
             } else {
                 eprintln!("Build configuration not found!");
             }
-        },
+        }
         DracutBuilderCommands::Bootentries => {
             for efi_part_info in get_efi_partitions() {
-                println!("{:?}", efi_part_info.get_efi_binaries());
+                println!("{:#?}", efi_part_info.existing_boot_entries());
             }
-        },
+        }
     }
-
 }
