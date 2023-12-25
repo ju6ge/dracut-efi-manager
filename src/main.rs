@@ -1,9 +1,10 @@
 //! Dracut Stub Manager
 //!
 //! A tool to create EFI binaries for Archlinux kernels for direct boot without a bootloader.
-use std::{collections::BTreeMap, fs, path::Path, process::Command, io::{self, Write}};
+use std::{collections::BTreeMap, fs::{self, File}, path::{Path, PathBuf}, process::Command, io::{self, Write, Read}};
 
 use config::Config;
+use gpt::{partition_types, partition::Partition};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use clap::Parser;
@@ -21,7 +22,9 @@ enum DracutBuilderCommands {
     /// build efi binaries for all configured kernels
     Build,
     /// clean efi directory from kernels that are not required anymore
-    Clean
+    Clean,
+    /// scan drives for efi partions and add boot entries for efi executables
+    Bootentries
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -219,22 +222,165 @@ const SETTINGS_FILE: &str = "settings.toml";
 #[cfg(not(debug_assertions))]
 const SETTINGS_FILE: &str = "/etc/dracut-efi-manager.toml";
 
+fn get_disk_device_paths() -> Vec<PathBuf> {
+    let mut disks = Vec::new();
+    if let Ok(entries) = fs::read_dir("/sys/class/block") {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+
+                let partition_file = path.join("partition");
+
+                if path.is_dir() && file_name != "." && file_name != ".." && !partition_file.exists() {
+                    disks.push(Path::new("/dev").join(file_name))
+                }
+            }
+        }
+    }
+    disks
+}
+
+fn get_mount_dir(device: &Path) -> Option<PathBuf> {
+    if let Ok(mounts) = fs::read_to_string("/proc/mounts") {
+        for line in mounts.lines() {
+            let line_split = line.split(' ').collect::<Vec<_>>();
+            if let Some(mounted_device) = line_split.get(0) {
+                if Path::new(mounted_device) == device {
+                    return Some(Path::new(line_split.get(1).unwrap()).to_path_buf())
+                }
+            }
+        }
+    }
+    None
+}
+
+struct EfiPartionInfo {
+    part_nr: u32,
+    disk_device: PathBuf,
+    info: Partition
+}
+
+impl EfiPartionInfo {
+    fn get_partiton_device(&self) -> Option<PathBuf> {
+        let disk_name = self.disk_device.file_name().unwrap().to_string_lossy().to_string();
+        if let Ok(entries) = fs::read_dir(Path::new("/sys/class/block").join(disk_name)) {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    let path = entry.path();
+                    let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+
+                    let partition_file = path.join("partition");
+
+                    if path.is_dir() && file_name != "." && file_name != ".." && partition_file.exists() {
+                        if let Ok(mut partition_file) = File::open(partition_file) {
+                            let mut num_str = String::new();
+                            let _ = partition_file.read_to_string(&mut num_str);
+                            if let Ok(nr) = num_str.trim().parse::<u32>() {
+                                if nr == self.part_nr {
+                                    return Some(Path::new("/dev").join(file_name));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn get_efi_binaries(&self) -> Vec<PathBuf> {
+        let mut efi_binaries = Vec::new();
+        if let Some(partition_device) = self.get_partiton_device() {
+            let mut had_to_be_mounted = false;
+            let mount_dir = match get_mount_dir(&partition_device) {
+                Some(path) => path,
+                None => {
+                    had_to_be_mounted = true;
+                    todo!();
+                },
+            };
+            efi_binaries.append(&mut get_efi_binaries(&mount_dir).iter_mut().map(|efi_bin_path| {
+                efi_bin_path.strip_prefix(&mount_dir).unwrap().to_path_buf()
+            }).collect());
+        }
+        efi_binaries
+    }
+}
+fn get_efi_binaries(path: &Path) -> Vec<PathBuf> {
+    let mut binaries = Vec::new();
+    if path.is_dir() {
+        binaries.append(&mut fs::read_dir(path).and_then(|entries| Ok(entries.into_iter().map(|entry| {
+            if let Ok(entry) = entry {
+                let file_name = entry.file_name().as_os_str().to_string_lossy().to_string();
+                if file_name != "." && file_name != ".." {
+                    Some(get_efi_binaries(&entry.path()))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }).flatten().flatten().collect::<Vec<PathBuf>>())).unwrap());
+    } else {
+        if let Some(ext) = path.extension() {
+            if ext.eq_ignore_ascii_case("efi") {
+                binaries.push(path.to_path_buf());
+            }
+        }
+    }
+    binaries
+}
+
+fn get_efi_partitions() -> Vec<EfiPartionInfo> {
+    let mut efi_partitions = Vec::new();
+    for disk in get_disk_device_paths() {
+        if let Ok(gpt_info) = gpt::disk::read_disk(&disk) {
+            for (nr, part) in gpt_info.partitions().into_iter() {
+                if part.part_type_guid == partition_types::EFI {
+                    efi_partitions.push(EfiPartionInfo{
+                        part_nr: *nr,
+                        disk_device: disk.clone(),
+                        info: part.clone(),
+                    });
+                }
+            }
+        }
+    }
+    efi_partitions
+}
+
+
 fn main() {
     let args = DracutCmdArgs::parse();
 
-    let settings: EfiStubBuildConfig = Config::builder()
+    let settings: Option<EfiStubBuildConfig> = Config::builder()
         .add_source(config::File::with_name(SETTINGS_FILE))
         .build_cloned()
-        .expect("Error Reading Config File!")
-        .try_deserialize()
-        .expect("Error parsing Configuration!");
+        .and_then(|settings_file| {
+           settings_file.try_deserialize()
+        })
+        .ok();
 
     match args.command {
         DracutBuilderCommands::Build => {
-            build_efi_binaries(&settings)
+            if let Some(settings) = settings {
+                build_efi_binaries(&settings)
+            } else {
+                eprintln!("Build configuration not found!");
+            }
         },
         DracutBuilderCommands::Clean => {
-            clean_efi_binaries(&settings)
+            if let Some(settings) = settings {
+                clean_efi_binaries(&settings)
+            } else {
+                eprintln!("Build configuration not found!");
+            }
+        },
+        DracutBuilderCommands::Bootentries => {
+            for efi_part_info in get_efi_partitions() {
+                println!("{:?}", efi_part_info.get_efi_binaries());
+            }
         },
     }
 
