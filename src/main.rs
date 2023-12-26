@@ -3,6 +3,7 @@
 //! A tool to create EFI binaries for Archlinux kernels for direct boot without a bootloader.
 use std::{
     collections::BTreeMap,
+    fmt::Display,
     fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -34,6 +35,8 @@ enum DracutBuilderCommands {
     Clean,
     /// scan drives for efi partions and add boot entries for efi executables
     Bootentries,
+    /// interactive boot order manipulation
+    Bootorder,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -252,7 +255,7 @@ fn clean_efi_binaries(settings: &EfiStubBuildConfig) {
     }
 }
 
-fn boot_entries_handler(settings: Option<EfiStubBuildConfig>) {
+fn boot_entries_handler() {
     let efi_partitions = get_efi_partitions();
     if efi_partitions.is_empty() {
         println!("No efi partitions found. No boot entries to configure.");
@@ -535,6 +538,17 @@ mod boot_nr_gen_tests {
     }
 }
 
+struct BootOrderData {
+    id: u16,
+    name: String,
+}
+
+impl Display for BootOrderData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name)
+    }
+}
+
 fn main() {
     let args = DracutCmdArgs::parse();
 
@@ -560,7 +574,49 @@ fn main() {
             }
         }
         DracutBuilderCommands::Bootentries => {
-            boot_entries_handler(settings);
+            boot_entries_handler();
+        }
+        DracutBuilderCommands::Bootorder => {
+            if let Ok(boot_order) = efivar::system().get_boot_order() {
+                if let Ok(boot_id_map) =
+                    efivar::system()
+                        .get_boot_entries()
+                        .and_then(|boot_entries| {
+                            Ok(boot_entries
+                                .into_iter()
+                                .map(|entry| {
+                                    if let Ok(boot_entry) = entry.0 {
+                                        Some((boot_entry.id, boot_entry.entry.description))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .flatten()
+                                .collect::<BTreeMap<u16, String>>())
+                        })
+                {
+                    let boot_order_names: Vec<BootOrderData> = boot_order
+                        .into_iter()
+                        .map(|id| {
+                            let name = boot_id_map.get(&id).unwrap();
+                            BootOrderData {
+                                id,
+                                name: name.to_string(),
+                            }
+                        })
+                        .collect();
+                    let new_order = dialoguer::Sort::new()
+                        .with_prompt("What boot order do you prefer? … Use space to select and arrow keys to navigate")
+                        .items(&boot_order_names)
+                        .interact()
+                        .unwrap();
+                    let new_boot_order: Vec<u16> = new_order.into_iter().map(|pos| {
+                        boot_order_names.get(pos).unwrap()
+                    }).map(|b| b.id).collect();
+
+                    let _ = efivar::system().set_boot_order(new_boot_order);
+                }
+            }
         }
     }
 }
