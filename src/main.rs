@@ -381,7 +381,9 @@ impl EfiPartionInfo {
                     had_to_be_mounted = true;
                     let temp_mount_dir = create_temp_mount_dir().unwrap();
 
-                    let _ = Command::new("mount").args([partition_device.as_os_str(), temp_mount_dir.as_os_str()]).output();
+                    let _ = Command::new("mount")
+                        .args([partition_device.as_os_str(), temp_mount_dir.as_os_str()])
+                        .output();
                     temp_mount_dir
                 }
             };
@@ -395,7 +397,9 @@ impl EfiPartionInfo {
             );
 
             if had_to_be_mounted {
-                let _ = Command::new("umount").args([mount_dir.as_os_str()]).output();
+                let _ = Command::new("umount")
+                    .args([mount_dir.as_os_str()])
+                    .output();
                 fs::remove_dir_all(&mount_dir).unwrap();
             }
         }
@@ -631,9 +635,11 @@ fn main() {
                         .items(&boot_order_names)
                         .interact()
                         .unwrap();
-                    let new_boot_order: Vec<u16> = new_order.into_iter().map(|pos| {
-                        boot_order_names.get(pos).unwrap()
-                    }).map(|b| b.id).collect();
+                    let new_boot_order: Vec<u16> = new_order
+                        .into_iter()
+                        .map(|pos| boot_order_names.get(pos).unwrap())
+                        .map(|b| b.id)
+                        .collect();
 
                     let _ = efivar::system().set_boot_order(new_boot_order);
                 }
