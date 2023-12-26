@@ -11,7 +11,7 @@ use std::{
 
 use clap::Parser;
 use config::Config;
-use efivar::boot::{BootEntry, FilePathList, FilePath, EFIHardDrive, BootEntryAttributes};
+use efivar::boot::{BootEntry, BootEntryAttributes, EFIHardDrive, FilePath, FilePathList};
 use gpt::{partition::Partition, partition_types};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -252,6 +252,37 @@ fn clean_efi_binaries(settings: &EfiStubBuildConfig) {
     }
 }
 
+fn boot_entries_handler(settings: Option<EfiStubBuildConfig>) {
+    let efi_partitions = get_efi_partitions();
+    if efi_partitions.is_empty() {
+        println!("No efi partitions found. No boot entries to configure.");
+    } else {
+        for efi_part in efi_partitions {
+            let efi_binaries = efi_part.get_efi_binaries();
+            let exisiting_boot_entries = efi_part.existing_boot_entries();
+            for efi_bin in efi_binaries {
+                if exisiting_boot_entries.contains_key(&efi_bin) {
+                } else {
+                    if dialoguer::Confirm::new()
+                        .with_prompt(format!(
+                            "No boot entry found for efi binary `{:?}`. Do you want to create one?",
+                            efi_bin.as_path()
+                        ))
+                        .interact()
+                        .unwrap()
+                    {
+                        let description: String = dialoguer::Input::new()
+                            .with_prompt("Give the boot Entry a description:")
+                            .interact()
+                            .unwrap();
+                        add_boot_entry(efi_part.gen_boot_entry(&efi_bin, description), None);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(debug_assertions)]
 const SETTINGS_FILE: &str = "settings.toml";
 
@@ -368,8 +399,17 @@ impl EfiPartionInfo {
                 if let Ok(entry) = entry.0 {
                     if let Some(boot_path) = entry.entry.clone().file_path_list {
                         for efi_bin in self.get_efi_binaries() {
+                            let mut boot_file_path = boot_path
+                                .file_path
+                                .path
+                                .to_string_lossy()
+                                .to_string()
+                                .replace("\\", "/");
+                            if boot_file_path.starts_with("/") {
+                                boot_file_path = boot_file_path.replacen("/", "", 1);
+                            }
                             if boot_path.hard_drive.partition_sig == self.info.part_guid
-                                && boot_path.file_path.path == efi_bin
+                                && boot_file_path == efi_bin.to_string_lossy().to_string()
                             {
                                 boot_entries_map.insert(efi_bin, entry.entry.clone());
                             }
@@ -385,9 +425,10 @@ impl EfiPartionInfo {
         BootEntry {
             attributes: BootEntryAttributes::LOAD_OPTION_ACTIVE,
             description: name,
-            file_path_list: FilePathList {
+            file_path_list: Some(FilePathList {
                 file_path: FilePath {
-                    path: efi_bin.to_path_buf()
+                    path: Path::new(&efi_bin.to_string_lossy().to_string().replace("/", "\\"))
+                        .to_path_buf(),
                 },
                 hard_drive: EFIHardDrive {
                     partition_number: self.part_nr,
@@ -397,8 +438,8 @@ impl EfiPartionInfo {
                     format: 2,
                     sig_type: efivar::boot::EFIHardDriveType::Gpt,
                 },
-            },
-            optional_data: Vec::new()
+            }),
+            optional_data: Vec::new(),
         }
     }
 }
@@ -458,6 +499,42 @@ fn get_efi_partitions() -> Vec<EfiPartionInfo> {
     efi_partitions
 }
 
+fn add_boot_entry(entry: BootEntry, boot_position: Option<usize>) {
+    if let Ok(mut boot_order) = efivar::system().get_boot_order() {
+        let boot_id = get_free_boot_id(&boot_order);
+        let _ = efivar::system().add_boot_entry(boot_id, entry);
+        match boot_position {
+            Some(boot_position) => boot_order.insert(boot_position, boot_id),
+            None => boot_order.push(boot_id),
+        }
+        let _ = efivar::system().set_boot_order(boot_order);
+    }
+}
+
+fn get_free_boot_id(boot_order: &Vec<u16>) -> u16 {
+    let mut numbers = boot_order.clone();
+    numbers.sort();
+    let mut result = 0;
+    for nr in numbers {
+        if nr == result {
+            result = nr + 1;
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod boot_nr_gen_tests {
+    use crate::get_free_boot_id;
+
+    #[test]
+    fn gen_boot_number_test() {
+        assert_eq!(get_free_boot_id(&vec![1, 2]), 0);
+        assert_eq!(get_free_boot_id(&vec![0, 2]), 1);
+        assert_eq!(get_free_boot_id(&vec![0, 10, 11, 1]), 2);
+    }
+}
+
 fn main() {
     let args = DracutCmdArgs::parse();
 
@@ -483,9 +560,7 @@ fn main() {
             }
         }
         DracutBuilderCommands::Bootentries => {
-            for efi_part_info in get_efi_partitions() {
-                println!("{:#?}", efi_part_info.existing_boot_entries());
-            }
+            boot_entries_handler(settings);
         }
     }
 }
