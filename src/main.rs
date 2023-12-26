@@ -264,8 +264,7 @@ fn boot_entries_handler() {
             let efi_binaries = efi_part.get_efi_binaries();
             let exisiting_boot_entries = efi_part.existing_boot_entries();
             for efi_bin in efi_binaries {
-                if exisiting_boot_entries.contains_key(&efi_bin) {
-                } else {
+                if !exisiting_boot_entries.contains_key(&efi_bin) {
                     if dialoguer::Confirm::new()
                         .with_prompt(format!(
                             "No boot entry found for efi binary `{:?}`. Do you want to create one?",
@@ -380,7 +379,10 @@ impl EfiPartionInfo {
                 Some(path) => path,
                 None => {
                     had_to_be_mounted = true;
-                    todo!();
+                    let temp_mount_dir = create_temp_mount_dir().unwrap();
+
+                    let _ = Command::new("mount").args([partition_device.as_os_str(), temp_mount_dir.as_os_str()]).output();
+                    temp_mount_dir
                 }
             };
             efi_binaries.append(
@@ -391,6 +393,11 @@ impl EfiPartionInfo {
                     })
                     .collect(),
             );
+
+            if had_to_be_mounted {
+                let _ = Command::new("umount").args([mount_dir.as_os_str()]).output();
+                fs::remove_dir_all(&mount_dir).unwrap();
+            }
         }
         efi_binaries
     }
@@ -445,6 +452,20 @@ impl EfiPartionInfo {
             optional_data: Vec::new(),
         }
     }
+}
+
+fn create_temp_mount_dir() -> io::Result<PathBuf> {
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_else(|_| 0);
+
+    let temp_dir_name = format!("temp_efimount_{}", unique_id);
+    let temp_dir_path = Path::new("/tmp").join(&temp_dir_name);
+
+    fs::create_dir(&temp_dir_path)?;
+
+    Ok(temp_dir_path)
 }
 
 fn get_efi_binaries(path: &Path) -> Vec<PathBuf> {
