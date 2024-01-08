@@ -4,6 +4,9 @@ on:
   release:
     types: [created]
 
+env:
+  PREFIX: /usr
+
 jobs:
   release:
     name: release ${{ matrix.target }}
@@ -20,4 +23,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           RUSTTARGET: ${{ matrix.target }}
-          #EXTRA_FILES: "README.md LICENSE"
+          EXTRA_FILES: "target/x86_64-unknown-linux-musl/release/libalpm/90-dracut-efibin-install.hook target/x86_64-unknown-linux-musl/release/libalpm/90-dracut-efibin-clean.hook"
