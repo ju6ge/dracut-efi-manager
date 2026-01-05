@@ -33,6 +33,8 @@ enum DracutBuilderCommands {
     Build,
     /// clean efi directory from kernels that are not required anymore
     Clean,
+    /// List all installed kernels
+    List,
     /// scan drives for efi partions and add boot entries for efi executables
     Bootentries,
     /// interactive boot order manipulation
@@ -90,7 +92,9 @@ fn get_current_running_kernel() -> String {
     current_running_kernel
 }
 
-fn get_newest_installed_kernels(settings: &EfiStubBuildConfig) -> BTreeMap<&String, String> {
+fn list_all_recognized_kernel_module_directories(
+    settings: &EfiStubBuildConfig,
+) -> BTreeMap<&String, Vec<KernelVersion>> {
     //accumulator for kernels modules directories to find the newest fill with empty vectors
     let mut found_kernel_modules: BTreeMap<&String, Vec<KernelVersion>> =
         BTreeMap::from_iter(settings.build_mappings.keys().map(|v| (v, Vec::new())));
@@ -119,6 +123,12 @@ fn get_newest_installed_kernels(settings: &EfiStubBuildConfig) -> BTreeMap<&Stri
             Some(())
         });
     }
+    found_kernel_modules
+}
+
+fn get_newest_installed_kernels(settings: &EfiStubBuildConfig) -> BTreeMap<&String, String> {
+    //accumulator for kernels modules directories to find the newest fill with empty vectors
+    let found_kernel_modules = list_all_recognized_kernel_module_directories(settings);
     //println!("{found_kernel_modules:#?}");
 
     //find the newest kernel for each release type
@@ -584,6 +594,19 @@ fn main() {
         .ok();
 
     match args.command {
+        DracutBuilderCommands::List => {
+            if let Some(settings) = settings {
+                let all_found_kernels = list_all_recognized_kernel_module_directories(&settings);
+                for (kind, kernels) in all_found_kernels.iter() {
+                    println!("{kind}:");
+                    for k in kernels {
+                        println!("- {} {}", k.full_name, k.version)
+                    }
+                }
+            } else {
+                eprintln!("Build configuration not found!");
+            }
+        }
         DracutBuilderCommands::Build => {
             if let Some(settings) = settings {
                 build_efi_binaries(&settings)
